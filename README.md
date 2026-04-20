@@ -74,6 +74,13 @@ If you find `githubswitch` helpful, consider supporting its development!
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://ko-fi.com/vishalranjan)
 
+## 📬 Contact
+
+If you have any questions, suggestions, or just want to say hi, feel free to reach out:
+
+- **Email**: [mr.vishalranjan007@gmail.com](mailto:mr.vishalranjan007@gmail.com)
+- **GitHub**: [@Mr-Vishal-Ranjan](https://github.com/Mr-Vishal-Ranjan)
+
 ---
 
 ## 📄 License

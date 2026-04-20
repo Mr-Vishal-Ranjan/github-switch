@@ -3,6 +3,7 @@
 # ╔══════════════════════════════════════════════════════════════╗
 # ║                  GitHub Switch (githubswitch)                ║
 # ║          Manage multiple GitHub accounts on one machine      ║
+# ║          Contact: mr.vishalranjan007@gmail.com               ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 CONF_FILE="$HOME/.ssh/githubswitch.conf"
