@@ -1,0 +1,725 @@
+#!/bin/bash
+
+# ╔══════════════════════════════════════════════════════════════╗
+# ║                  GitHub Switch (githubswitch)                ║
+# ║          Manage multiple GitHub accounts on one machine      ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+CONF_FILE="$HOME/.ssh/githubswitch.conf"
+SSH_DIR="$HOME/.ssh"
+SSH_CONFIG="$HOME/.ssh/config"
+
+# ── Colors ────────────────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+BOLD='\033[1m'
+DIM='\033[2m'
+RESET='\033[0m'
+
+# ── Helpers ───────────────────────────────────────────────────
+info()    { echo -e "${CYAN}  ℹ ${RESET} $1"; }
+success() { echo -e "${GREEN}  ✔ ${RESET} $1"; }
+warn()    { echo -e "${YELLOW}  ⚠ ${RESET} $1"; }
+error()   { echo -e "${RED}  ✖ ${RESET} $1"; }
+divider() { echo -e "${DIM}  ──────────────────────────────────────────${RESET}"; }
+
+# ── Parse GitHub Repo (extract user/repo) ─────────────────────
+parse_gh_repo() {
+  local input="$1"
+  # Remove https/ssh prefix and .git suffix
+  # Handles: https://github.com/user/repo, git@github.com:user/repo.git, user/repo
+  echo "$input" | sed -E 's|.*github\.com[:/](.*)|\1|; s|\.git$||'
+}
+
+banner() {
+  clear
+  echo -e "${BOLD}${BLUE}"
+  echo "  ╔════════════════════════════════════════════╗"
+  echo "  ║         GitHub Switch — githubswitch       ║"
+  echo "  ╚════════════════════════════════════════════╝"
+  echo -e "${RESET}"
+}
+
+pause() {
+  echo ""
+  read -rp "  Press Enter to continue..." _
+}
+
+# ── Name Validation (lowercase alpha only) ────────────────────
+validate_name() {
+  local name="$1"
+  if [[ ! "$name" =~ ^[a-z]+$ ]]; then
+    error "Invalid name '${name}'. Only lowercase letters (a-z) allowed. No numbers, spaces, or symbols."
+    return 1
+  fi
+  return 0
+}
+
+# ── Check if account exists in conf ──────────────────────────
+account_exists() {
+  local name="$1"
+  grep -q "^\[account:${name}\]" "$CONF_FILE" 2>/dev/null
+}
+
+# ── Get a value from conf for an account ─────────────────────
+get_conf_value() {
+  local account="$1" key="$2"
+  awk "/^\[account:${account}\]/{found=1} found && /^${key}=/{print; found=0}" "$CONF_FILE" \
+    | cut -d'=' -f2-
+}
+
+# ── Get all account names ─────────────────────────────────────
+get_all_accounts() {
+  grep "^\[account:" "$CONF_FILE" 2>/dev/null | sed 's/\[account:\(.*\)\]/\1/'
+}
+
+# ── Get repos for an account ──────────────────────────────────
+get_repos() {
+  local account="$1"
+  awk "/^\[account:${account}\]/{found=1} /^\[account:/ && !/^\[account:${account}\]/{found=0} found && /^repo=/{print}" \
+    "$CONF_FILE" 2>/dev/null | cut -d'=' -f2-
+}
+
+# ── Select an account ─────────────────────────────────────────
+select_account() {
+  local accounts
+  mapfile -t accounts < <(get_all_accounts)
+  if [[ ${#accounts[@]} -eq 0 ]]; then
+    warn "No accounts found." >&2
+    return 1
+  fi
+
+  echo -e "  Select account:\n" >&2
+  for i in "${!accounts[@]}"; do
+    echo -e "    ${BOLD}[$((i+1))]${RESET} ${accounts[$i]}" >&2
+  done
+  echo -e "    ${BOLD}[b]${RESET} Back to previous menu" >&2
+  echo -e "    ${BOLD}[q]${RESET} Quit program" >&2
+  echo "" >&2
+  
+  local choice
+  read -rp "  Enter choice (1-${#accounts[@]}/b/q): " choice
+  
+  if [[ "$choice" == "q" || "$choice" == "Q" ]]; then 
+    echo "" >&2
+    info "Bye!" >&2
+    echo -e "  ${YELLOW}Support this project? ☕ https://www.buymeacoffee.com/YOUR_USERNAME${RESET}" >&2
+    echo "" >&2
+    exit 0
+  fi
+  if [[ "$choice" == "b" || "$choice" == "B" ]]; then return 2; fi
+
+  local account="${accounts[$((choice-1))]}"
+  if [[ -z "$account" ]]; then
+    error "Invalid choice." >&2
+    return 1
+  fi
+  echo "$account"
+  return 0
+}
+
+# ── Write a new account block to conf ─────────────────────────
+write_account_conf() {
+  local name="$1" email="$2" key_path="$3"
+  cat >> "$CONF_FILE" <<EOF
+
+[account:${name}]
+email=${email}
+key=${key_path}
+EOF
+}
+
+# ── Append a repo line under an account ───────────────────────
+append_repo_to_account() {
+  local account="$1" repo_path="$2"
+  # Insert repo= line after last line of account block
+  local tmp
+  tmp=$(mktemp)
+  awk -v acc="$account" -v repo="$repo_path" '
+    /^\[account:/ && found { print "repo=" repo; found=0 }
+    /^\[account:'"$account"'\]/ { found=1 }
+    { print }
+    END { if (found) print "repo=" repo }
+  ' "$CONF_FILE" > "$tmp" && mv "$tmp" "$CONF_FILE"
+}
+
+# ── Generate SSH key for an account ──────────────────────────
+generate_key() {
+  local name="$1" email="$2"
+  local key_path="${SSH_DIR}/githubswitch_${name}"
+
+  if [[ -f "$key_path" ]]; then
+    warn "Key already exists for '${name}' at ${key_path}"
+    return 0
+  fi
+
+  info "Generating SSH key for '${name}'..."
+  ssh-keygen -t ed25519 -C "$email" -f "$key_path" -N "" -q
+  if [[ $? -ne 0 ]]; then
+    error "Failed to generate SSH key for '${name}'"
+    return 1
+  fi
+  success "Key generated: ${key_path}"
+  echo "$key_path"
+}
+
+# ── Write SSH config block ────────────────────────────────────
+write_ssh_config() {
+  local name="$1" key_path="$2"
+  local host="github-${name}"
+
+  if grep -q "Host ${host}" "$SSH_CONFIG" 2>/dev/null; then
+    return 0
+  fi
+
+  cat >> "$SSH_CONFIG" <<EOF
+
+# githubswitch:${name}
+Host ${host}
+    HostName github.com
+    User git
+    IdentityFile ${key_path}
+    IdentitiesOnly yes
+EOF
+  chmod 600 "$SSH_CONFIG"
+}
+
+# ── Display public key with instructions ──────────────────────
+display_key_instructions() {
+  local name="$1" key_path="$2"
+  local pub_key
+  pub_key=$(cat "${key_path}.pub")
+
+  echo ""
+  echo -e "  ${BOLD}${MAGENTA}── SSH Key for account: ${name} ──────────────────────${RESET}"
+  echo ""
+  echo -e "  ${YELLOW}${pub_key}${RESET}"
+  echo ""
+  divider
+  info "To add this key to your GitHub account:"
+  echo -e "  ${BOLD}1.${RESET} Copy the key above"
+  echo -e "  ${BOLD}2.${RESET} Open: ${CYAN}https://github.com/settings/ssh/new${RESET}"
+  echo -e "  ${BOLD}3.${RESET} Title: anything (e.g. ${name}-machine)"
+  echo -e "  ${BOLD}4.${RESET} Paste the key → Click ${GREEN}Add SSH key${RESET}"
+  echo ""
+  echo -e "  ${DIM}Quick copy command:${RESET}"
+  echo -e "  ${BOLD}cat ${key_path}.pub${RESET}"
+  divider
+}
+
+# ══════════════════════════════════════════════════════════════
+#  SETUP
+# ══════════════════════════════════════════════════════════════
+run_setup() {
+  banner
+  echo -e "  ${BOLD}Welcome! Let's set up GitHub Switch.${RESET}"
+  echo -e "  ${DIM}Config will be saved to: ${CONF_FILE}${RESET}"
+  echo ""
+
+  # Init conf file
+  mkdir -p "$SSH_DIR"
+  echo "# githubswitch config — do not edit manually" > "$CONF_FILE"
+  echo "# Created: $(date)" >> "$CONF_FILE"
+  chmod 600 "$CONF_FILE"
+
+  # How many accounts
+  local count
+  while true; do
+    read -rp "  How many GitHub accounts do you want to manage? " count
+    if [[ "$count" =~ ^[1-9][0-9]*$ ]]; then
+      break
+    fi
+    error "Please enter a valid number."
+  done
+
+  echo ""
+  info "You'll now set up ${count} account(s)."
+  divider
+
+  local names=()
+  local emails=()
+
+  # Collect all names + emails first
+  for (( i=1; i<=count; i++ )); do
+    echo -e "\n  ${BOLD}Account $i of $count${RESET}"
+
+    local name email
+    while true; do
+      read -rp "  Name (lowercase letters only, e.g. work / personal): " name
+      if validate_name "$name"; then
+        if [[ " ${names[*]} " == *" $name "* ]]; then
+          error "Name '${name}' already used. Choose a different name."
+        else
+          break
+        fi
+      fi
+    done
+
+    read -rp "  GitHub email for '${name}': " email
+    names+=("$name")
+    emails+=("$email")
+  done
+
+  echo ""
+  divider
+  info "Generating SSH keys for all accounts..."
+  divider
+
+  # Generate keys + write configs
+  for (( i=0; i<count; i++ )); do
+    local name="${names[$i]}"
+    local email="${emails[$i]}"
+    local key_path="${SSH_DIR}/githubswitch_${name}"
+
+    generate_key "$name" "$email"
+    write_account_conf "$name" "$email" "$key_path"
+    write_ssh_config "$name" "$key_path"
+  done
+
+  echo ""
+  divider
+  echo -e "  ${BOLD}${GREEN}All keys generated! Now add each key to its GitHub account:${RESET}"
+  divider
+
+  for (( i=0; i<count; i++ )); do
+    local name="${names[$i]}"
+    local key_path="${SSH_DIR}/githubswitch_${name}"
+    display_key_instructions "$name" "$key_path"
+    
+    if [[ $i -lt $((count-1)) ]]; then
+      echo -e "  ${DIM}Next account: ${names[$((i+1))]}${RESET}"
+      read -rp "  Press Enter to see next SSH key... " _
+    else
+      read -rp "  Press Enter to finish setup and continue to menu... " _
+    fi
+  done
+
+  echo ""
+  success "Setup complete! Run ${BOLD}./githubswitch${RESET} again to open the menu."
+  echo ""
+}
+
+# ══════════════════════════════════════════════════════════════
+#  MENU — ADD REPO
+# ══════════════════════════════════════════════════════════════
+menu_add_repo() {
+  banner
+  echo -e "  ${BOLD}Add / Register a Repo${RESET}\n"
+
+  local account
+  account=$(select_account)
+  local res=$?
+  if [[ res -eq 1 ]]; then pause; return; fi
+  if [[ res -eq 2 ]]; then return; fi
+
+  local email key_path
+  email=$(get_conf_value "$account" "email")
+  key_path=$(get_conf_value "$account" "key")
+
+  echo ""
+  echo -e "  ${BOLD}What do you want to do?${RESET}"
+  echo -e "    ${BOLD}[1]${RESET} Clone a remote GitHub repo"
+  echo -e "    ${BOLD}[2]${RESET} Register an existing local repo"
+  echo -e "    ${BOLD}[b]${RESET} Back"
+  echo ""
+  read -rp "  Enter choice (1-2/b): " repo_choice
+
+  case "$repo_choice" in
+    1)
+      # Clone remote repo
+      echo ""
+      echo -e "  ${DIM}Accepted formats:${RESET}"
+      echo -e "    - https://github.com/user/project"
+      echo -e "    - git@github.com:user/project.git"
+      echo -e "    - user/project"
+      echo ""
+      read -rp "  GitHub repo URL or path: " gh_input
+      read -rp "  Local folder name (Enter for default): " dest_dir
+
+      local gh_repo
+      gh_repo=$(parse_gh_repo "$gh_input")
+      local host="github-${account}"
+      local clone_url="git@${host}:${gh_repo}.git"
+      local final_dest="${dest_dir:-$(basename "$gh_repo")}"
+
+      info "Cloning ${clone_url}..."
+      ssh-add "$key_path" 2>/dev/null
+      git clone "$clone_url" "$final_dest"
+
+      if [[ $? -eq 0 ]]; then
+        local abs_path
+        abs_path=$(realpath "$final_dest")
+        # Set local git identity
+        git -C "$final_dest" config user.name "$account"
+        git -C "$final_dest" config user.email "$email"
+        success "Git identity set → name: ${account}, email: ${email}"
+
+        # Track repo in conf
+        append_repo_to_account "$account" "$abs_path"
+        success "Repo tracked in config: ${abs_path}"
+      else
+        error "Clone failed. Check your URL and SSH key addition."
+      fi
+      ;;
+    2)
+      # Register existing local repo
+      echo ""
+      read -rp "  Path to local repo (Enter for current directory '.'): " repo_path
+      repo_path="${repo_path:-.}"
+      local abs_path
+      abs_path=$(realpath "$repo_path")
+
+      if [[ ! -d "${abs_path}/.git" ]]; then
+        error "Not a git repo: ${abs_path}"
+        pause; return
+      fi
+
+      # Update remote URL to use correct SSH host
+      local current_remote
+      current_remote=$(git -C "$abs_path" remote get-url origin 2>/dev/null)
+      if [[ -n "$current_remote" ]]; then
+        info "Current remote: ${current_remote}"
+        local gh_path
+        gh_path=$(parse_gh_repo "$current_remote")
+        local new_remote="git@github-${account}:${gh_path}.git"
+        git -C "$abs_path" remote set-url origin "$new_remote"
+        success "Remote updated → ${new_remote}"
+      fi
+
+      # Set local git identity
+      git -C "$abs_path" config user.name "$account"
+      git -C "$abs_path" config user.email "$email"
+      success "Git identity set → name: ${account}, email: ${email}"
+
+      # Track repo
+      append_repo_to_account "$account" "$abs_path"
+      success "Repo registered: ${abs_path}"
+      ;;
+    b|B) return ;;
+    *) error "Invalid choice." ;;
+  esac
+
+  pause
+}
+
+# ══════════════════════════════════════════════════════════════
+#  MENU — ADD REMOTE
+# ══════════════════════════════════════════════════════════════
+menu_add_remote() {
+  banner
+  echo -e "  ${BOLD}Add Git Remote to Project${RESET}\n"
+
+  local account
+  account=$(select_account)
+  local res=$?
+  if [[ res -eq 1 ]]; then pause; return; fi
+  if [[ res -eq 2 ]]; then return; fi
+
+  local email
+  email=$(get_conf_value "$account" "email")
+
+  echo ""
+  read -rp "  Path to local folder (Enter for current directory '.'): " project_path
+  project_path="${project_path:-.}"
+  local abs_path
+  abs_path=$(realpath "$project_path")
+
+  if [[ ! -d "$abs_path" ]]; then
+    error "Directory not found: ${abs_path}"
+    pause; return
+  fi
+
+  # Init git if needed
+  if [[ ! -d "${abs_path}/.git" ]]; then
+    info "Initializing git in ${abs_path}..."
+    git -C "$abs_path" init
+  fi
+
+  echo ""
+  echo -e "  ${DIM}Accepted formats:${RESET}"
+  echo -e "    - https://github.com/user/project"
+  echo -e "    - git@github.com:user/project.git"
+  echo -e "    - user/project"
+  echo ""
+  read -rp "  Remote GitHub URL or path: " gh_input
+  
+  local gh_repo
+  gh_repo=$(parse_gh_repo "$gh_input")
+  local new_remote="git@github-${account}:${gh_repo}.git"
+
+  # Add or set origin
+  if git -C "$abs_path" remote get-url origin &>/dev/null; then
+    git -C "$abs_path" remote set-url origin "$new_remote"
+    success "Remote 'origin' updated to: ${new_remote}"
+  else
+    git -C "$abs_path" remote add origin "$new_remote"
+    success "Remote 'origin' added: ${new_remote}"
+  fi
+
+  # Set local identity
+  git -C "$abs_path" config user.name "$account"
+  git -C "$abs_path" config user.email "$email"
+  success "Git identity set → name: ${account}, email: ${email}"
+
+  # Track repo
+  append_repo_to_account "$account" "$abs_path"
+  success "Project tracked in config: ${abs_path}"
+
+  pause
+}
+
+# ══════════════════════════════════════════════════════════════
+#  MENU — ADD ACCOUNT
+# ══════════════════════════════════════════════════════════════
+menu_add_account() {
+  banner
+  echo -e "  ${BOLD}Add a New GitHub Account${RESET}\n"
+
+  local name email
+  while true; do
+    read -rp "  Account name (lowercase letters only, 'b' to go back): " name
+    if [[ "$name" == "b" || "$name" == "B" ]]; then return; fi
+    if validate_name "$name"; then
+      if account_exists "$name"; then
+        error "Account '${name}' already exists."
+      else
+        break
+      fi
+    fi
+  done
+
+  read -rp "  GitHub email for '${name}': " email
+
+  local key_path="${SSH_DIR}/githubswitch_${name}"
+  generate_key "$name" "$email"
+  write_account_conf "$name" "$email" "$key_path"
+  write_ssh_config "$name" "$key_path"
+
+  display_key_instructions "$name" "$key_path"
+  pause
+}
+
+# ══════════════════════════════════════════════════════════════
+#  MENU — SHOW ALL ACCOUNTS
+# ══════════════════════════════════════════════════════════════
+menu_show_accounts() {
+  banner
+  echo -e "  ${BOLD}All Accounts${RESET}\n"
+
+  local accounts
+  mapfile -t accounts < <(get_all_accounts)
+
+  if [[ ${#accounts[@]} -eq 0 ]]; then
+    warn "No accounts configured."
+    pause; return
+  fi
+
+  for account in "${accounts[@]}"; do
+    local email key_path
+    email=$(get_conf_value "$account" "email")
+    key_path=$(get_conf_value "$account" "key")
+
+    echo -e "  ${BOLD}${GREEN}● ${account}${RESET}"
+    echo -e "    Email   : ${email}"
+    echo -e "    SSH Key : ${key_path}"
+
+    local repos
+    mapfile -t repos < <(get_repos "$account")
+    if [[ ${#repos[@]} -gt 0 ]]; then
+      echo -e "    Repos   :"
+      for repo in "${repos[@]}"; do
+        echo -e "      ${DIM}→${RESET} ${repo}"
+      done
+    else
+      echo -e "    Repos   : ${DIM}none${RESET}"
+    fi
+    divider
+  done
+
+  read -rp "  Press Enter to go back to menu... " _
+}
+
+# ══════════════════════════════════════════════════════════════
+#  MENU — SHOW KEY
+# ══════════════════════════════════════════════════════════════
+menu_show_key() {
+  banner
+  echo -e "  ${BOLD}Show SSH Key${RESET}\n"
+
+  local account
+  account=$(select_account)
+  local res=$?
+  if [[ res -eq 1 ]]; then pause; return; fi
+  if [[ res -eq 2 ]]; then return; fi
+
+  local key_path
+  key_path=$(get_conf_value "$account" "key")
+  display_key_instructions "$account" "$key_path"
+  pause
+}
+
+# ══════════════════════════════════════════════════════════════
+#  MENU — DELETE ACCOUNT
+# ══════════════════════════════════════════════════════════════
+menu_delete_account() {
+  banner
+  echo -e "  ${BOLD}Delete an Account${RESET}\n"
+
+  local account
+  account=$(select_account)
+  local res=$?
+  if [[ res -eq 1 ]]; then pause; return; fi
+  if [[ res -eq 2 ]]; then return; fi
+
+  # Warn about linked repos
+  local repos
+  mapfile -t repos < <(get_repos "$account")
+  if [[ ${#repos[@]} -gt 0 ]]; then
+    echo ""
+    warn "Account '${account}' has ${#repos[@]} linked repo(s):"
+    for repo in "${repos[@]}"; do
+      echo -e "      ${DIM}→${RESET} ${repo}"
+    done
+    warn "These repos will NOT be deleted, but their SSH remote may stop working."
+    echo ""
+    read -rp "  Are you sure you want to delete '${account}'? (yes/no): " confirm
+    if [[ "$confirm" != "yes" ]]; then
+      info "Cancelled."
+      pause; return
+    fi
+  else
+    read -rp "  Delete account '${account}'? (yes/no): " confirm
+    if [[ "$confirm" != "yes" ]]; then
+      info "Cancelled."
+      pause; return
+    fi
+  fi
+
+  local key_path
+  key_path=$(get_conf_value "$account" "key")
+
+  # Remove SSH keys
+  rm -f "$key_path" "${key_path}.pub"
+  success "SSH keys removed."
+
+  # Remove SSH config block
+  local tmp
+  tmp=$(mktemp)
+  awk "/# githubswitch:${account}/{skip=1} skip && /^$/{skip=0; next} !skip{print}" \
+    "$SSH_CONFIG" > "$tmp" && mv "$tmp" "$SSH_CONFIG"
+  success "SSH config block removed."
+
+  # Remove account from conf
+  tmp=$(mktemp)
+  awk "/^\[account:${account}\]/{skip=1} /^\[account:/ && !/^\[account:${account}\]/{skip=0} !skip{print}" \
+    "$CONF_FILE" > "$tmp" && mv "$tmp" "$CONF_FILE"
+  success "Account '${account}' removed from config."
+
+  pause
+}
+
+# ══════════════════════════════════════════════════════════════
+#  MENU — DESTROY ALL
+# ══════════════════════════════════════════════════════════════
+menu_destroy_all() {
+  banner
+  echo -e "  ${BOLD}${RED}⚠  Destroy All — GitHub Switch${RESET}\n"
+  warn "This will permanently remove:"
+  echo -e "  ${DIM}→${RESET} All SSH keys created by githubswitch"
+  echo -e "  ${DIM}→${RESET} All githubswitch blocks from ~/.ssh/config"
+  echo -e "  ${DIM}→${RESET} The githubswitch.conf file"
+  echo ""
+  warn "Your repos and GitHub accounts will NOT be affected."
+  echo ""
+
+  read -rp "  Type 'DESTROY' to confirm (or 'b' to go back): " confirm
+  if [[ "$confirm" == "b" || "$confirm" == "B" ]]; then return; fi
+  if [[ "$confirm" != "DESTROY" ]]; then
+    info "Cancelled."
+    pause; return
+  fi
+
+  # Backup first
+  local backup="${HOME}/.ssh/githubswitch.conf.backup.$(date +%Y%m%d%H%M%S)"
+  cp "$CONF_FILE" "$backup"
+  success "Backup saved to: ${backup}"
+  echo ""
+
+  # Remove all keys
+  local accounts
+  mapfile -t accounts < <(get_all_accounts)
+  for account in "${accounts[@]}"; do
+    local key_path
+    key_path=$(get_conf_value "$account" "key")
+    rm -f "$key_path" "${key_path}.pub"
+    success "Removed keys for '${account}'"
+  done
+
+  # Remove all githubswitch blocks from SSH config
+  local tmp
+  tmp=$(mktemp)
+  awk '/# githubswitch:/{skip=1} /^$/ && skip{skip=0; next} !skip{print}' \
+    "$SSH_CONFIG" > "$tmp" && mv "$tmp" "$SSH_CONFIG"
+  success "SSH config cleaned."
+
+  # Delete conf
+  rm -f "$CONF_FILE"
+  success "githubswitch.conf deleted."
+
+  echo ""
+  success "GitHub Switch has been completely removed from this machine."
+  echo -e "  ${DIM}Backup kept at: ${backup}${RESET}"
+  echo ""
+  exit 0
+}
+
+# ══════════════════════════════════════════════════════════════
+#  MAIN MENU
+# ══════════════════════════════════════════════════════════════
+main_menu() {
+  while true; do
+    banner
+    echo -e "  ${BOLD}Main Menu${RESET}\n"
+    echo -e "    ${BOLD}[1]${RESET} Add / Clone Repo"
+    echo -e "    ${BOLD}[2]${RESET} Add Remote to Project"
+    echo -e "    ${BOLD}[3]${RESET} Add Account"
+    echo -e "    ${BOLD}[4]${RESET} Show All Accounts"
+    echo -e "    ${BOLD}[5]${RESET} Show SSH Key"
+    echo -e "    ${BOLD}[6]${RESET} Delete Account"
+    echo -e "    ${BOLD}[7]${RESET} ${RED}Destroy All GitHub Switch${RESET}"
+    echo -e "    ${BOLD}[q]${RESET} Quit program"
+    echo ""
+    read -rp "  Enter choice (1-7/q): " choice
+
+    case "$choice" in
+      1) menu_add_repo ;;
+      2) menu_add_remote ;;
+      3) menu_add_account ;;
+      4) menu_show_accounts ;;
+      5) menu_show_key ;;
+      6) menu_delete_account ;;
+      7) menu_destroy_all ;;
+      q|Q) 
+        echo ""
+        info "Bye!"
+        echo -e "  ${YELLOW}Support this project? ☕ https://ko-fi.com/vishalranjan${RESET}"
+        echo ""
+        exit 0 
+        ;;
+      *) warn "Invalid choice." ;;
+    esac
+  done
+}
+
+# ══════════════════════════════════════════════════════════════
+#  ENTRY POINT
+# ══════════════════════════════════════════════════════════════
+if [[ ! -f "$CONF_FILE" ]]; then
+  run_setup
+else
+  main_menu
+fi
