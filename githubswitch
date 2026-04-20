@@ -107,7 +107,7 @@ select_account() {
   if [[ "$choice" == "q" || "$choice" == "Q" ]]; then 
     echo "" >&2
     info "Bye!" >&2
-    echo -e "  ${YELLOW}Support this project? ☕ https://www.buymeacoffee.com/YOUR_USERNAME${RESET}" >&2
+    echo -e "  ${YELLOW}Support this project? ☕ https://ko-fi.com/vishalranjan${RESET}" >&2
     echo "" >&2
     exit 0
   fi

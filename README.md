@@ -18,13 +18,13 @@ Manage multiple GitHub accounts on a single machine with ease. `githubswitch` au
 
 ### One-Liner (Quick Install)
 ```bash
-curl -sSL https://raw.githubusercontent.com/YOUR_USERNAME/github-switch/main/githubswitch -o githubswitch && chmod +x githubswitch
+curl -sSL https://raw.githubusercontent.com/Mr-Vishal-Ranjan/github-switch/main/githubswitch -o githubswitch && chmod +x githubswitch
 ```
 
 ### Manual Installation
 1. Clone this repository:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/github-switch.git
+   git clone https://github.com/Mr-Vishal-Ranjan/github-switch.git
    ```
 2. Make the script executable:
    ```bash
@@ -72,7 +72,7 @@ curl -sSL https://raw.githubusercontent.com/YOUR_USERNAME/github-switch/main/git
 
 If you find `githubswitch` helpful, consider supporting its development!
 
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://ko-fi.com/vishalranjan)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-F16061?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/vishalranjan)
 
 ---
 
