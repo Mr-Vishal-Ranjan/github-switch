@@ -24,30 +24,24 @@ Manage multiple GitHub accounts on a single machine with ease. `githubswitch` au
    sudo mv githubswitch /usr/local/bin/
    ```
 
-### 🪟 Windows (Native PowerShell)
-1. **Download the script**:
-   ```powershell
-   Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Mr-Vishal-Ranjan/github-switch/main/githubswitch.ps1" -OutFile "githubswitch.ps1"
+### 🪟 Windows (via Git Bash)
+1. **Quick Install**:
+   ```bash
+   curl -sSL https://raw.githubusercontent.com/Mr-Vishal-Ranjan/github-switch/main/githubswitch -o githubswitch && chmod +x githubswitch
    ```
-2. **Run the script**:
-   ```powershell
-   .\githubswitch.ps1
+2. **Run**:
+   ```bash
+   ./githubswitch
    ```
-   *Note: Ensure your `ExecutionPolicy` allows running local scripts (e.g., `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`).*
 
 ---
 
-## 📖 How to Use
+### 🚀 Usage
 
-### On macOS / Linux / Git Bash:
-```bash
-./githubswitch
-```
-
-### On Windows (PowerShell):
-```powershell
-.\githubswitch.ps1
-```
+1. **Run the script**:
+   ```bash
+   ./githubswitch
+   ```
 2. **Initial Setup**: The first time you run it, you'll be prompted to set up your accounts. You'll need to copy the generated SSH keys to your GitHub settings (links are provided in the script).
 3. **Add a Repository**:
    - Choose **Add / Clone Repo** to start working on a project.
