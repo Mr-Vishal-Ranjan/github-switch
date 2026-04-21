@@ -180,7 +180,7 @@ generate_key() {
   fi
 
   info "Generating SSH key for '${name}'..."
-  ssh-keygen -t ed25519 -C "$email" -f "$key_path" -N "" -q
+  ssh-keygen -C "$email" -f "$key_path" -N "" -q
   if [[ $? -ne 0 ]]; then
     error "Failed to generate SSH key for '${name}'"
     return 1
