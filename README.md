@@ -14,7 +14,8 @@ Manage multiple GitHub accounts on a single machine with ease. `githubswitch` au
 
 ---
 
-### 🍎 macOS / Linux (Bash)
+## 🛠 Installation
+
 1. **Quick Install**:
    ```bash
    curl -sSL https://raw.githubusercontent.com/Mr-Vishal-Ranjan/github-switch/main/githubswitch -o githubswitch && chmod +x githubswitch
@@ -24,15 +25,7 @@ Manage multiple GitHub accounts on a single machine with ease. `githubswitch` au
    sudo mv githubswitch /usr/local/bin/
    ```
 
-### 🪟 Windows (via Git Bash)
-1. **Quick Install**:
-   ```bash
-   curl -sSL https://raw.githubusercontent.com/Mr-Vishal-Ranjan/github-switch/main/githubswitch -o githubswitch && chmod +x githubswitch
-   ```
-2. **Run**:
-   ```bash
-   ./githubswitch
-   ```
+*(Note: Windows users should run these commands in **Git Bash**).*
 
 ---
 
