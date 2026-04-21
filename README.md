@@ -14,36 +14,40 @@ Manage multiple GitHub accounts on a single machine with ease. `githubswitch` au
 
 ---
 
-## 🛠 Installation
-
-### One-Liner (Quick Install)
-```bash
-curl -sSL https://raw.githubusercontent.com/Mr-Vishal-Ranjan/github-switch/main/githubswitch -o githubswitch && chmod +x githubswitch
-```
-
-### Manual Installation
-1. Clone this repository:
+### 🍎 macOS / Linux (Bash)
+1. **Quick Install**:
    ```bash
-   git clone https://github.com/Mr-Vishal-Ranjan/github-switch.git
+   curl -sSL https://raw.githubusercontent.com/Mr-Vishal-Ranjan/github-switch/main/githubswitch -o githubswitch && chmod +x githubswitch
    ```
-2. Make the script executable:
-   ```bash
-   cd github-switch
-   chmod +x githubswitch
-   ```
-3. (Optional) Add it to your PATH:
+2. **Move to PATH** (optional):
    ```bash
    sudo mv githubswitch /usr/local/bin/
    ```
+
+### 🪟 Windows (Native PowerShell)
+1. **Download the script**:
+   ```powershell
+   Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Mr-Vishal-Ranjan/github-switch/main/githubswitch.ps1" -OutFile "githubswitch.ps1"
+   ```
+2. **Run the script**:
+   ```powershell
+   .\githubswitch.ps1
+   ```
+   *Note: Ensure your `ExecutionPolicy` allows running local scripts (e.g., `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`).*
 
 ---
 
 ## 📖 How to Use
 
-1. **Run the script**:
-   ```bash
-   ./githubswitch
-   ```
+### On macOS / Linux / Git Bash:
+```bash
+./githubswitch
+```
+
+### On Windows (PowerShell):
+```powershell
+.\githubswitch.ps1
+```
 2. **Initial Setup**: The first time you run it, you'll be prompted to set up your accounts. You'll need to copy the generated SSH keys to your GitHub settings (links are provided in the script).
 3. **Add a Repository**:
    - Choose **Add / Clone Repo** to start working on a project.

@@ -28,6 +28,24 @@ warn()    { echo -e "${YELLOW}  ⚠ ${RESET} $1"; }
 error()   { echo -e "${RED}  ✖ ${RESET} $1"; }
 divider() { echo -e "${DIM}  ──────────────────────────────────────────${RESET}"; }
 
+# Cross-platform realpath/abspath
+get_realpath() {
+  local path="$1"
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$path"
+  else
+    # Fallback for macOS/old systems
+    python3 -c "import os,sys; print(os.path.abspath(sys.argv[1]))" "$path" 2>/dev/null || \
+    perl -e 'use Cwd "abs_path"; print abs_path(shift)' "$path" 2>/dev/null || \
+    (cd "$path" 2>/dev/null && pwd) || echo "$path"
+  fi
+}
+
+# Cross-platform mktemp
+get_mktemp() {
+  mktemp -t githubswitch.XXXXXX 2>/dev/null || mktemp
+}
+
 # ── Parse GitHub Repo (extract user/repo) ─────────────────────
 parse_gh_repo() {
   local input="$1"
@@ -87,8 +105,11 @@ get_repos() {
 
 # ── Select an account ─────────────────────────────────────────
 select_account() {
-  local accounts
-  mapfile -t accounts < <(get_all_accounts)
+  local accounts=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && accounts+=("$line")
+  done < <(get_all_accounts)
+
   if [[ ${#accounts[@]} -eq 0 ]]; then
     warn "No accounts found." >&2
     return 1
@@ -139,7 +160,7 @@ append_repo_to_account() {
   local account="$1" repo_path="$2"
   # Insert repo= line after last line of account block
   local tmp
-  tmp=$(mktemp)
+  tmp=$(get_mktemp)
   awk -v acc="$account" -v repo="$repo_path" '
     /^\[account:/ && found { print "repo=" repo; found=0 }
     /^\[account:'"$account"'\]/ { found=1 }
@@ -353,7 +374,7 @@ menu_add_repo() {
 
       if [[ $? -eq 0 ]]; then
         local abs_path
-        abs_path=$(realpath "$final_dest")
+        abs_path=$(get_realpath "$final_dest")
         # Set local git identity
         git -C "$final_dest" config user.name "$account"
         git -C "$final_dest" config user.email "$email"
@@ -372,7 +393,7 @@ menu_add_repo() {
       read -rp "  Path to local repo (Enter for current directory '.'): " repo_path
       repo_path="${repo_path:-.}"
       local abs_path
-      abs_path=$(realpath "$repo_path")
+      abs_path=$(get_realpath "$repo_path")
 
       if [[ ! -d "${abs_path}/.git" ]]; then
         error "Not a git repo: ${abs_path}"
@@ -427,7 +448,7 @@ menu_add_remote() {
   read -rp "  Path to local folder (Enter for current directory '.'): " project_path
   project_path="${project_path:-.}"
   local abs_path
-  abs_path=$(realpath "$project_path")
+  abs_path=$(get_realpath "$project_path")
 
   if [[ ! -d "$abs_path" ]]; then
     error "Directory not found: ${abs_path}"
@@ -511,8 +532,10 @@ menu_show_accounts() {
   banner
   echo -e "  ${BOLD}All Accounts${RESET}\n"
 
-  local accounts
-  mapfile -t accounts < <(get_all_accounts)
+  local accounts=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && accounts+=("$line")
+  done < <(get_all_accounts)
 
   if [[ ${#accounts[@]} -eq 0 ]]; then
     warn "No accounts configured."
@@ -528,8 +551,11 @@ menu_show_accounts() {
     echo -e "    Email   : ${email}"
     echo -e "    SSH Key : ${key_path}"
 
-    local repos
-    mapfile -t repos < <(get_repos "$account")
+    local repos=()
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && repos+=("$line")
+    done < <(get_repos "$account")
+
     if [[ ${#repos[@]} -gt 0 ]]; then
       echo -e "    Repos   :"
       for repo in "${repos[@]}"; do
@@ -577,8 +603,10 @@ menu_delete_account() {
   if [[ res -eq 2 ]]; then return; fi
 
   # Warn about linked repos
-  local repos
-  mapfile -t repos < <(get_repos "$account")
+  local repos=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && repos+=("$line")
+  done < <(get_repos "$account")
   if [[ ${#repos[@]} -gt 0 ]]; then
     echo ""
     warn "Account '${account}' has ${#repos[@]} linked repo(s):"
@@ -609,13 +637,13 @@ menu_delete_account() {
 
   # Remove SSH config block
   local tmp
-  tmp=$(mktemp)
+  tmp=$(get_mktemp)
   awk "/# githubswitch:${account}/{skip=1} skip && /^$/{skip=0; next} !skip{print}" \
     "$SSH_CONFIG" > "$tmp" && mv "$tmp" "$SSH_CONFIG"
   success "SSH config block removed."
 
   # Remove account from conf
-  tmp=$(mktemp)
+  tmp=$(get_mktemp)
   awk "/^\[account:${account}\]/{skip=1} /^\[account:/ && !/^\[account:${account}\]/{skip=0} !skip{print}" \
     "$CONF_FILE" > "$tmp" && mv "$tmp" "$CONF_FILE"
   success "Account '${account}' removed from config."
@@ -651,8 +679,11 @@ menu_destroy_all() {
   echo ""
 
   # Remove all keys
-  local accounts
-  mapfile -t accounts < <(get_all_accounts)
+  local accounts=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && accounts+=("$line")
+  done < <(get_all_accounts)
+
   for account in "${accounts[@]}"; do
     local key_path
     key_path=$(get_conf_value "$account" "key")
@@ -662,7 +693,7 @@ menu_destroy_all() {
 
   # Remove all githubswitch blocks from SSH config
   local tmp
-  tmp=$(mktemp)
+  tmp=$(get_mktemp)
   awk '/# githubswitch:/{skip=1} /^$/ && skip{skip=0; next} !skip{print}' \
     "$SSH_CONFIG" > "$tmp" && mv "$tmp" "$SSH_CONFIG"
   success "SSH config cleaned."
